@@ -2,7 +2,7 @@
 
 import logging
 import os.path as op
-from typing import Annotated, Any, Dict, List, Optional, Union
+from typing import Annotated, Any, Dict, List, Optional, Union, Literal
 
 import cyclopts
 import dask.array as da
@@ -313,6 +313,7 @@ def mosaic2d(
     tile_overlap: float = 0.2,
     circular_mean: bool = False,
     angle_to_rgb: bool = False,
+    angle_units: Literal["deg", "rad"] = "deg",
     clip_x: int = 0,
     clip_y: int = 0,
     mask: Optional[str] = None,
@@ -352,6 +353,9 @@ def mosaic2d(
         Whether to color pixels based on in-plane angles. Use for orientation tiles.
         Saves to JPEG and TIFF outputs and leaves NIfTI and Zarr outputs with raw
         angles.
+    angle_units: Literal["deg", "rad"]
+        The units of the angles contained in the files. Only applies when angle_to_rgb
+        is true. Defaults is "deg".
     clip_x : int
         Number of pixels to clip from the left side of each tile. Coordinates will be
         shifted accordingly.
@@ -432,6 +436,9 @@ def mosaic2d(
         # Load 2D image
         try:
             image = _load_image_tile(file_path, file_key)
+            if angle_units == "rad" and angle_to_rgb:
+              image = da.rad2deg(image)
+
         except Exception as e:
             logger.warning(f"Failed to load {file_path}: {e}, skipping")
             continue
