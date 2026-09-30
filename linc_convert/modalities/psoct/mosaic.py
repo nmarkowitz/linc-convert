@@ -104,6 +104,10 @@ def _load_image_tile(file_path: str, key: str = None) -> da.Array:
 
 def _save_jpeg(image: np.ndarray, output_path: str, quality: int = 95) -> None:
     """Save image as JPEG."""
+    # Save as RGB
+    if image.ndim == 3 and image.shape[-1] == 3 and image.dtype == np.uint8:
+        Image.fromarray(image, "RGB").save(output_path, "JPEG", quality=quality)
+        return
     # Reduce to two dimensions
     if image.ndim==3:
         image = np.squeeze(image)
@@ -119,6 +123,20 @@ def _save_jpeg(image: np.ndarray, output_path: str, quality: int = 95) -> None:
     pil_image = Image.fromarray(normalized)
     pil_image.save(output_path, "JPEG", quality=quality)
 
+def _angle_to_rgb(angles: np.ndarray, background: Optional[np.ndarray] = None
+                  ) -> np.ndarray:
+    """Convert angles in array to RGB values.""" 
+    # Get rid of singleton dimension
+    angles = np.squeeze(angles).astype(np.float32)
+    # NaN becomes black
+    if background is not None:
+        angles = np.where(np.squeeze(background), np.nan, angles)  
+    import matplotlib.cm as cm
+    period = 180
+    hue = (angles % period) / period
+    rgba = cm.hsv(hue) 
+    rgb = (rgba[..., :3] * 255.0).round().astype(np.uint8)
+    return rgb
 
 def _save_tile_grid(
     tiles: List[TileInfo],
@@ -171,7 +189,9 @@ def _save_tiff(image: np.ndarray, output_path: str) -> None:
 
         # Save data as-is without any normalization or scaling
         # Preserve original dtype and values
-        tifffile.imwrite(output_path, image)
+        #tifffile.imwrite(output_path, image)
+        photometric = "rgb" if image.ndim == 3 and image.shape[-1] == 3 else None
+        tifffile.imwrite(output_path, image, photometric=photometric)
     except ImportError:
         raise ValueError("tifffile is not installed")
 
@@ -292,6 +312,7 @@ def mosaic2d(
     nifti_output: Optional[str] = None,
     tile_overlap: float = 0.2,
     circular_mean: bool = False,
+    angle_to_rgb: bool = False,
     clip_x: int = 0,
     clip_y: int = 0,
     mask: Optional[str] = None,
@@ -327,6 +348,10 @@ def mosaic2d(
         Tile overlap in pixels. If "auto", compute from tile coordinates.
     circular_mean : bool
         Whether to use circular mean for blending.
+    angle_to_rgb : bool
+        Whether to color pixels based on in-plane angles. Use for orientation tiles.
+        Saves to JPEG and TIFF outputs and leaves NIfTI and Zarr outputs with raw
+        angles.
     clip_x : int
         Number of pixels to clip from the left side of each tile. Coordinates will be
         shifted accordingly.
@@ -498,6 +523,7 @@ def mosaic2d(
         _save_tile_grid(tile_infos, tile_labels, mosaic.full_shape, print_grid)
 
     # Apply mask if provided
+    mask_array = None
     if mask:
         logger.info(f"Loading and applying mask: {mask}")
         try:
@@ -537,15 +563,24 @@ def mosaic2d(
         logger.info("NIfTI file saved successfully")
     result = result.T
 
+    # Format for saving to jpeg or tiff
+    preview = result
+    if angle_to_rgb and (jpeg_output or tiff_output):
+        background = ~np.isfinite(result)
+        if mask_array is not None:
+            background |= np.asarray(mask_array).T == 0
+        preview = _angle_to_rgb(result, background=background)
+
     # Save JPEG if requested
     if jpeg_output:
         logger.info(f"Saving JPEG preview: {jpeg_output}")
-        _save_jpeg(result, jpeg_output)
+        _save_jpeg(preview, jpeg_output)
 
     # Save TIFF if requested
     if tiff_output:
         logger.info(f"Saving TIFF: {tiff_output}")
-        _save_tiff(result, tiff_output)
+        _save_tiff(preview, tiff_output)
+
 
     # Save to Zarr if output is specified
     if general_config.out:
