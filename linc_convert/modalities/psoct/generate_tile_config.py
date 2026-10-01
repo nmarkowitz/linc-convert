@@ -447,7 +447,7 @@ def generate_tile_config(
     out: Annotated[str, Parameter(name=["--output", "-o"])] = "tile_config.yaml",
     grid_type: str = "snake-by-columns",
     order: str = None,
-    overlap_percentage: float = 0.0,
+    overlap_percentage: float | tuple[float, float]  | list[float, float] = 0.0,
 ) -> None:
     """
     Generate tile configuration YAML file for Grid/Collection Stitching.
@@ -502,7 +502,7 @@ def generate_tile_config(
         - down-left: Start top-right, go down
         - up-right: Start bottom-left, go up
         - up-left: Start bottom-right, go up
-    overlap_percentage : float
+    overlap_percentage : float | tuple[float, float]  | list[float, float]
         Overlap percentage (0.0-1.0) that affects tile spacing (default: 0.0)
 
     Examples
@@ -559,9 +559,22 @@ def generate_tile_config(
         )
 
     # Validate overlap_percentage
-    if not 0.0 <= overlap_percentage <= 1.0:
+    if isinstance(overlap_percentage, (tuple, list)):
+        if len(overlap_percentage) != 2:
+            raise ValueError(
+                "overlap_percentage tuple must have 2 elements (x_overlap, y_overlap)"
+            )
+        overlap_x, overlap_y = overlap_percentage
+    else:
+        overlap_x = overlap_y = overlap_percentage
+
+    if not 0.0 <= overlap_x <= 1.0:
         raise ValueError(
-            f"overlap_percentage must be between 0.0 and 1.0, got {overlap_percentage}"
+            f"overlap_percentage must be between 0.0 and 1.0, got {overlap_x}"
+        )
+    if not 0.0 <= overlap_y <= 1.0:
+        raise ValueError(
+            f"overlap_percentage must be between 0.0 and 1.0, got {overlap_y}"
         )
 
     # Generate tiles based on grid type
@@ -573,15 +586,15 @@ def generate_tile_config(
         "snake-by-columns": _generate_snake_by_columns,
     }
     tiles = generator_map[grid_type](
-        columns, rows, tile_size_x, tile_size_y, overlap, overlap, order, naming_format
+        columns, rows, tile_size_x, tile_size_y, overlap_x, overlap_y, order, naming_format
     )
 
     # Build metadata
     metadata = {"base_dir": base_dir, "scan_resolution": [0.01, 0.01]}
 
     # Add overlap to metadata if specified
-    if overlap_percentage > 0.0:
-        metadata["tile_overlap"] = overlap_percentage
+    if overlap_x > 0.0 or overlap_y > 0.0:
+        metadata["tile_overlap"] = [overlap_x, overlap_y]
 
     config = {"metadata": metadata, "tiles": tiles}
 
@@ -591,8 +604,10 @@ def generate_tile_config(
 
     print(f"Generated tile configuration with {len(tiles)} tiles")
     print(f"Grid type: {grid_type}, Order: {order}")
-    if overlap_percentage > 0.0:
-        print(f"Overlap: {overlap_percentage * 100:.1f}%")
+    if overlap_x > 0.0:
+        print(f"Overlap X: {overlap_x * 100:.1f}%")
+    if overlap_y > 0.0:
+        print(f"Overlap Y: {overlap_y * 100:.1f}%")
     print(f"Configuration written to: {out}")
     print("\nFirst few tiles:")
     for tile in tiles[:5]:

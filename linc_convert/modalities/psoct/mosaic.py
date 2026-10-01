@@ -138,6 +138,44 @@ def _angle_to_rgb(angles: np.ndarray, background: Optional[np.ndarray] = None
     rgb = (rgba[..., :3] * 255.0).round().astype(np.uint8)
     return rgb
 
+def _orientation_wheel(size: int, inner: float = 0.35) -> tuple[np.ndarray, np.ndarray]:
+    """Return an RGB orientation ring (size, size, 3) and its pixel mask."""
+    c = (size - 1) / 2
+    dy, dx = np.mgrid[0:size, 0:size] - c
+    r = np.hypot(dx, dy) / c
+    # 0° = +x (right), positive angles toward +y (down), matching the preview axes
+    phi = np.degrees(np.arctan2(dy, dx))
+    outside = (r > 1) | (r < inner)
+    return _angle_to_rgb(phi, background=outside), ~outside
+
+def _add_orientation_wheel(
+    rgb: np.ndarray, frac: float = 0.1, pad: int = 10
+) -> np.ndarray:
+    """Draw a labelled orientation wheel in the top-right corner of an RGB image."""
+    h, w = rgb.shape[:2]
+    size = max(96, int(min(h, w) * frac))  # wheel diameter
+    margin = size // 4  # room for labels around the ring
+    box = size + 2 * margin
+    if box + pad > min(h, w):
+        logger.warning("Image too small for orientation wheel; skipping")
+        return rgb
+    wheel, inside = _orientation_wheel(size)
+    y0, x0 = pad, w - pad - box
+    rgb = rgb.copy()
+    rgb[y0 : y0 + box, x0 : x0 + box] = 0  # dark panel
+    region = rgb[y0 + margin : y0 + margin + size, x0 + margin : x0 + margin + size]
+    region[inside] = wheel[inside]
+
+    img = Image.fromarray(rgb, "RGB")
+    draw = ImageDraw.Draw(img)
+    font = ImageFont.load_default(size=max(10, margin // 2))
+    cx, cy, rad = x0 + box / 2, y0 + box / 2, size / 2 + margin / 2
+    for a in (0, 45, 90, 135):
+        t = np.radians(a)
+        pos = (cx + rad * np.cos(t), cy + rad * np.sin(t))
+        draw.text(pos, f"{a}°", font=font, anchor="mm", fill="white")
+    return np.asarray(img)
+
 def _save_tile_grid(
     tiles: List[TileInfo],
     labels: List[str],
@@ -310,10 +348,11 @@ def mosaic2d(
     print_grid: Optional[str] = None,
     tiff_output: Annotated[Optional[str], Parameter(name=["--tiff", "-t"])] = None,
     nifti_output: Optional[str] = None,
-    tile_overlap: float = 0.2,
+    tile_overlap: float | tuple[float, float]  | list[float, float] | Literal["auto"]= 0.2,
     circular_mean: bool = False,
     angle_to_rgb: bool = False,
     angle_units: Literal["deg", "rad"] = "deg",
+    color_wheel: bool = True,
     clip_x: int = 0,
     clip_y: int = 0,
     mask: Optional[str] = None,
@@ -345,7 +384,7 @@ def mosaic2d(
         on its longest axis, plus margins.
     tiff_output : str, optional
         Path to save TIFF image.
-    tile_overlap : float | Literal["auto"]
+    tile_overlap : float | Tuple[float, float] | List[float, float] | Literal["auto"]
         Tile overlap in pixels. If "auto", compute from tile coordinates.
     circular_mean : bool
         Whether to use circular mean for blending.
@@ -356,6 +395,9 @@ def mosaic2d(
     angle_units: Literal["deg", "rad"]
         The units of the angles contained in the files. Only applies when angle_to_rgb
         is true. Defaults is "deg".
+    color_wheel : bool
+        With angle_to_rgb, draw an orientation colour wheel in the top-right
+        corner of the jpeg and tiff images.
     clip_x : int
         Number of pixels to clip from the left side of each tile. Coordinates will be
         shifted accordingly.
@@ -577,6 +619,8 @@ def mosaic2d(
         if mask_array is not None:
             background |= np.asarray(mask_array).T == 0
         preview = _angle_to_rgb(result, background=background)
+        if color_wheel:
+            preview = _add_orientation_wheel(preview)
 
     # Save JPEG if requested
     if jpeg_output:

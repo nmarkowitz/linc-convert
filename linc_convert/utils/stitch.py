@@ -398,7 +398,7 @@ def _normalize_tile_overlap(
         (x_overlap, y_overlap) in pixels.
     """
     # Handle tuple case
-    if isinstance(tile_overlap, tuple):
+    if isinstance(tile_overlap, tuple) or isinstance(tile_overlap, list):
         if len(tile_overlap) != 2:
             raise ValueError(
                 "tile_overlap tuple must have 2 elements (x_overlap, y_overlap)")
