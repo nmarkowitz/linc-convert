@@ -138,18 +138,18 @@ def _angle_to_rgb(angles: np.ndarray, background: Optional[np.ndarray] = None
     rgb = (rgba[..., :3] * 255.0).round().astype(np.uint8)
     return rgb
 
-def _orientation_wheel(size: int, inner: float = 0.35) -> tuple[np.ndarray, np.ndarray]:
+def _orientation_wheel(size: int, inner: float = 0.35, offset: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
     """Return an RGB orientation ring (size, size, 3) and its pixel mask."""
     c = (size - 1) / 2
     dy, dx = np.mgrid[0:size, 0:size] - c
     r = np.hypot(dx, dy) / c
     # 0° = +x (right), positive angles toward +y (down), matching the preview axes
-    phi = np.degrees(np.arctan2(dy, dx))
+    phi = np.degrees(np.arctan2(dy, dx)) + offset
     outside = (r > 1) | (r < inner)
     return _angle_to_rgb(phi, background=outside), ~outside
 
 def _add_orientation_wheel(
-    rgb: np.ndarray, frac: float = 0.1, pad: int = 10
+    rgb: np.ndarray, frac: float = 0.1, pad: int = 10, offset: float = 0.0
 ) -> np.ndarray:
     """Draw a labelled orientation wheel in the top-right corner of an RGB image."""
     h, w = rgb.shape[:2]
@@ -353,6 +353,7 @@ def mosaic2d(
     angle_to_rgb: bool = False,
     angle_units: Literal["deg", "rad"] = "deg",
     color_wheel: bool = True,
+    color_wheel_offset: float = 0.0,
     clip_x: int = 0,
     clip_y: int = 0,
     mask: Optional[str] = None,
@@ -398,6 +399,9 @@ def mosaic2d(
     color_wheel : bool
         With angle_to_rgb, draw an orientation colour wheel in the top-right
         corner of the jpeg and tiff images.
+    color_wheel_offset : float
+        Offset for the color wheel position. Adjust so coloried orientation mathes 
+        color wheel directions.
     clip_x : int
         Number of pixels to clip from the left side of each tile. Coordinates will be
         shifted accordingly.
@@ -620,7 +624,7 @@ def mosaic2d(
             background |= np.asarray(mask_array).T == 0
         preview = _angle_to_rgb(result, background=background)
         if color_wheel:
-            preview = _add_orientation_wheel(preview)
+            preview = _add_orientation_wheel(preview, offset=color_wheel_offset)
 
     # Save JPEG if requested
     if jpeg_output:
